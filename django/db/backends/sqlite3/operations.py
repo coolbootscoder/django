@@ -14,6 +14,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime, parse_time
 from django.utils.functional import cached_property
 
+from .base import Database
+
 
 class DatabaseOperations(BaseDatabaseOperations):
     cast_char_field_without_max_length = "text"
@@ -28,12 +30,22 @@ class DatabaseOperations(BaseDatabaseOperations):
 
     def bulk_batch_size(self, fields, objs):
         """
-        SQLite has a compile-time default (SQLITE_LIMIT_VARIABLE_NUMBER) of
-        999 variables per query.
+        SQLite has a variable limit defined by SQLITE_LIMIT_VARIABLE_NUMBER
+        (reflected in max_query_params).
 
         If there's only a single field to insert, the limit is 500
         (SQLITE_MAX_COMPOUND_SELECT).
         """
+        fields = list(
+            chain.from_iterable(
+                (
+                    field.fields
+                    if isinstance(field, models.CompositePrimaryKey)
+                    else [field]
+                )
+                for field in fields
+            )
+        )
         if len(fields) == 1:
             return 500
         elif len(fields) > 1:
@@ -261,10 +273,6 @@ class DatabaseOperations(BaseDatabaseOperations):
         if value is None:
             return None
 
-        # Expression values are adapted by the database.
-        if hasattr(value, "resolve_expression"):
-            return value
-
         # SQLite doesn't support tz-aware datetimes
         if timezone.is_aware(value):
             if settings.USE_TZ:
@@ -280,10 +288,6 @@ class DatabaseOperations(BaseDatabaseOperations):
     def adapt_timefield_value(self, value):
         if value is None:
             return None
-
-        # Expression values are adapted by the database.
-        if hasattr(value, "resolve_expression"):
-            return value
 
         # SQLite doesn't support tz-aware datetimes
         if timezone.is_aware(value):
@@ -359,11 +363,6 @@ class DatabaseOperations(BaseDatabaseOperations):
     def convert_booleanfield_value(self, value, expression, connection):
         return bool(value) if value in (1, 0) else value
 
-    def bulk_insert_sql(self, fields, placeholder_rows):
-        placeholder_rows_sql = (", ".join(row) for row in placeholder_rows)
-        values_sql = ", ".join(f"({sql})" for sql in placeholder_rows_sql)
-        return f"VALUES {values_sql}"
-
     def combine_expression(self, connector, sub_expressions):
         # SQLite doesn't have a ^ operator, so use the user-defined POWER
         # function that's registered in connect().
@@ -376,7 +375,7 @@ class DatabaseOperations(BaseDatabaseOperations):
     def combine_duration_expression(self, connector, sub_expressions):
         if connector not in ["+", "-", "*", "/"]:
             raise DatabaseError("Invalid connector for timedelta: %s." % connector)
-        fn_params = ["'%s'" % connector] + sub_expressions
+        fn_params = ["'%s'" % connector, *sub_expressions]
         if len(fn_params) > 3:
             raise ValueError("Too many params for timedelta operations.")
         return "django_format_dtdelta(%s)" % ", ".join(fn_params)
@@ -439,3 +438,9 @@ class DatabaseOperations(BaseDatabaseOperations):
             update_fields,
             unique_fields,
         )
+
+    def force_group_by(self):
+        return ["GROUP BY TRUE"] if Database.sqlite_version_info < (3, 39) else []
+
+    def format_json_path_numeric_index(self, num):
+        return "[#%s]" % num if num < 0 else super().format_json_path_numeric_index(num)

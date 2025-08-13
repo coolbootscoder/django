@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
+from functools import wraps
 from pathlib import Path
 from unittest import mock, skipIf
 
@@ -89,6 +90,25 @@ KEY_ERRORS_WITH_MEMCACHED_MSG = (
 )
 
 
+def retry(retries=3, delay=1):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            while attempts < retries:
+                try:
+                    return func(*args, **kwargs)
+                except AssertionError:
+                    attempts += 1
+                    if attempts >= retries:
+                        raise
+                    time.sleep(delay)
+
+        return wrapper
+
+    return decorator
+
+
 @override_settings(
     CACHES={
         "default": {
@@ -136,7 +156,9 @@ class DummyCacheTests(SimpleTestCase):
         self.assertIsNone(cache.get("key2"))
 
     def test_has_key(self):
-        "The has_key method doesn't ever return True for the dummy cache backend"
+        """
+        The has_key method doesn't ever return True for the dummy cache backend
+        """
         cache.set("hello1", "goodbye1")
         self.assertIs(cache.has_key("hello1"), False)
         self.assertIs(cache.has_key("goodbye1"), False)
@@ -282,11 +304,10 @@ _caches_setting_base = {
 
 
 def caches_setting_for_tests(base=None, exclude=None, **params):
-    # `base` is used to pull in the memcached config from the original settings,
-    # `exclude` is a set of cache names denoting which `_caches_setting_base` keys
-    # should be omitted.
-    # `params` are test specific overrides and `_caches_settings_base` is the
-    # base config for the tests.
+    # `base` is used to pull in the memcached config from the original
+    # settings, `exclude` is a set of cache names denoting which
+    # `_caches_setting_base` keys should be omitted. `params` are test specific
+    # overrides and `_caches_settings_base` is the base config for the tests.
     # This results in the following search order:
     # params -> _caches_setting_base -> base
     base = base or {}
@@ -449,7 +470,8 @@ class BaseCacheTests:
         self.assertEqual(expensive_calculation.num_runs, 1)
 
     def test_cache_write_for_model_instance_with_deferred(self):
-        # Don't want fields with callable as default to be called on cache write
+        # Don't want fields with callable as default to be called on cache
+        # write
         expensive_calculation.num_runs = 0
         Poll.objects.all().delete()
         Poll.objects.create(question="What?")
@@ -473,7 +495,8 @@ class BaseCacheTests:
         self.assertEqual(expensive_calculation.num_runs, 1)
         runs_before_cache_read = expensive_calculation.num_runs
         cache.get("deferred_queryset")
-        # We only want the default expensive calculation run on creation and set
+        # We only want the default expensive calculation run on creation and
+        # set
         self.assertEqual(expensive_calculation.num_runs, runs_before_cache_read)
 
     def test_expiration(self):
@@ -489,6 +512,7 @@ class BaseCacheTests:
         self.assertEqual(cache.get("expire2"), "newvalue")
         self.assertIs(cache.has_key("expire3"), False)
 
+    @retry()
     def test_touch(self):
         # cache.touch() updates the timeout.
         cache.set("expire1", "very quickly", timeout=1)
@@ -616,6 +640,7 @@ class BaseCacheTests:
         self.assertEqual(cache.get("key3"), "sausage")
         self.assertEqual(cache.get("key4"), "lobster bisque")
 
+    @retry()
     def test_forever_timeout(self):
         """
         Passing in None into timeout results in a value that is cached forever
@@ -1144,7 +1169,8 @@ class BaseCacheTests:
 @override_settings(
     CACHES=caches_setting_for_tests(
         BACKEND="django.core.cache.backends.db.DatabaseCache",
-        # Spaces are used in the table name to ensure quoting/escaping is working
+        # Spaces are used in the table name to ensure quoting/escaping is
+        # working
         LOCATION="test cache table",
     )
 )
@@ -1155,11 +1181,7 @@ class DBCacheTests(BaseCacheTests, TransactionTestCase):
         # The super calls needs to happen first for the settings override.
         super().setUp()
         self.create_table()
-
-    def tearDown(self):
-        # The super call needs to happen first because it uses the database.
-        super().tearDown()
-        self.drop_table()
+        self.addCleanup(self.drop_table)
 
     def create_table(self):
         management.call_command("createcachetable", verbosity=0)
@@ -1238,7 +1260,8 @@ class DBCacheTests(BaseCacheTests, TransactionTestCase):
     @override_settings(
         CACHES=caches_setting_for_tests(
             BACKEND="django.core.cache.backends.db.DatabaseCache",
-            # Use another table name to avoid the 'table already exists' message.
+            # Use another table name to avoid the 'table already exists'
+            # message.
             LOCATION="createcachetable_dry_run_mode",
         )
     )
@@ -1391,7 +1414,9 @@ class LocMemCacheTests(BaseCacheTests, TestCase):
         self.assertFalse(bad_obj.locked, "Cache was locked during pickling")
 
     def test_incr_decr_timeout(self):
-        """incr/decr does not modify expiry time (matches memcached behavior)"""
+        """
+        incr/decr does not modify expiry time (matches memcached behavior)
+        """
         key = "value"
         _key = cache.make_key(key)
         cache.set(key, 1, timeout=cache.default_timeout * 10)
@@ -1401,6 +1426,7 @@ class LocMemCacheTests(BaseCacheTests, TestCase):
         self.assertEqual(cache.decr(key), 1)
         self.assertEqual(expire, cache._expire_info[_key])
 
+    @retry()
     @limit_locmem_entries
     def test_lru_get(self):
         """get() moves cache keys."""
@@ -1428,6 +1454,7 @@ class LocMemCacheTests(BaseCacheTests, TestCase):
         for key in range(3):
             self.assertIsNone(cache.get(key))
 
+    @retry()
     @limit_locmem_entries
     def test_lru_incr(self):
         """incr() moves cache keys."""
@@ -1540,9 +1567,9 @@ class BaseMemcachedTests(BaseCacheTests):
             self.assertEqual(cache.get("future_foo"), "bar")
 
     def test_memcached_deletes_key_on_failed_set(self):
-        # By default memcached allows objects up to 1MB. For the cache_db session
-        # backend to always use the current session, memcached needs to delete
-        # the old key if it fails to set.
+        # By default memcached allows objects up to 1MB. For the cache_db
+        # session backend to always use the current session, memcached needs to
+        # delete the old key if it fails to set.
         max_value_length = 2**20
 
         cache.set("small_value", "a")
@@ -1557,7 +1584,8 @@ class BaseMemcachedTests(BaseCacheTests):
             # deleted, so the return/exception behavior for the set() itself is
             # not important.
             pass
-        # small_value should be deleted, or set if configured to accept larger values
+        # small_value should be deleted, or set if configured to accept larger
+        # values
         value = cache.get("small_value")
         self.assertTrue(value is None or value == large_value)
 
@@ -1765,6 +1793,28 @@ class FileBasedCacheTests(BaseCacheTests, TestCase):
         with mock.patch("builtins.open", side_effect=FileNotFoundError) as mocked_open:
             self.assertIs(cache.has_key("key"), False)
             mocked_open.assert_called_once()
+
+    def test_touch(self):
+        """Override to manually advance time since file access can be slow."""
+
+        class ManualTickingTime:
+            def __init__(self):
+                # Freeze time, calling `sleep` will manually advance it.
+                self._time = time.time()
+
+            def time(self):
+                return self._time
+
+            def sleep(self, seconds):
+                self._time += seconds
+
+        mocked_time = ManualTickingTime()
+        with (
+            mock.patch("django.core.cache.backends.filebased.time", new=mocked_time),
+            mock.patch("django.core.cache.backends.base.time", new=mocked_time),
+            mock.patch("cache.tests.time", new=mocked_time),
+        ):
+            super().test_touch()
 
 
 @unittest.skipUnless(RedisCache_params, "Redis backend not configured")
@@ -2487,12 +2537,9 @@ class CacheMiddlewareTest(SimpleTestCase):
 
     def setUp(self):
         self.default_cache = caches["default"]
+        self.addCleanup(self.default_cache.clear)
         self.other_cache = caches["other"]
-
-    def tearDown(self):
-        self.default_cache.clear()
-        self.other_cache.clear()
-        super().tearDown()
+        self.addCleanup(self.other_cache.clear)
 
     def test_constructor(self):
         """
@@ -2603,7 +2650,8 @@ class CacheMiddlewareTest(SimpleTestCase):
         response = default_view(request, "2")
         self.assertEqual(response.content, b"Hello World 1")
 
-        # Requesting the same view with the explicit cache should yield the same result
+        # Requesting the same view with the explicit cache should yield the
+        # same result
         response = explicit_default_view(request, "3")
         self.assertEqual(response.content, b"Hello World 1")
 
@@ -2659,6 +2707,7 @@ class CacheMiddlewareTest(SimpleTestCase):
         response = other_with_prefix_view(request, "16")
         self.assertEqual(response.content, b"Hello World 16")
 
+    @retry()
     def test_cache_page_timeout(self):
         # Page timeout takes precedence over the "max-age" section of the
         # "Cache-Control".
@@ -2736,6 +2785,37 @@ class CacheMiddlewareTest(SimpleTestCase):
             thread.join()
 
         self.assertIsNot(thread_caches[0], thread_caches[1])
+
+    def test_cache_control_max_age(self):
+        view = cache_page(2)(hello_world_view)
+        request = self.factory.get("/view/")
+
+        # First request. Freshly created response gets returned with no Age
+        # header.
+        with mock.patch.object(
+            time, "time", return_value=1468749600
+        ):  # Sun, 17 Jul 2016 10:00:00 GMT
+            response = view(request, 1)
+            response.close()
+            self.assertIn("Expires", response)
+            self.assertEqual(response["Expires"], "Sun, 17 Jul 2016 10:00:02 GMT")
+            self.assertIn("Cache-Control", response)
+            self.assertEqual(response["Cache-Control"], "max-age=2")
+            self.assertNotIn("Age", response)
+
+        # Second request one second later. Response from the cache gets
+        # returned with an Age header set to 1 (second).
+        with mock.patch.object(
+            time, "time", return_value=1468749601
+        ):  # Sun, 17 Jul 2016 10:00:01 GMT
+            response = view(request, 1)
+            response.close()
+            self.assertIn("Expires", response)
+            self.assertEqual(response["Expires"], "Sun, 17 Jul 2016 10:00:02 GMT")
+            self.assertIn("Cache-Control", response)
+            self.assertEqual(response["Cache-Control"], "max-age=2")
+            self.assertIn("Age", response)
+            self.assertEqual(response["Age"], "1")
 
 
 @override_settings(

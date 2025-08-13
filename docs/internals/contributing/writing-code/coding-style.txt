@@ -35,8 +35,8 @@ with them.
 Python style
 ============
 
-* All files should be formatted using the `black`_ auto-formatter. This will be
-  run by ``pre-commit`` if that is configured.
+* All files should be formatted using the :pypi:`black` auto-formatter. This
+  will be run by ``pre-commit`` if that is configured.
 
 * The project repository includes an ``.editorconfig`` file. We recommend using
   a text editor with `EditorConfig`_ support to avoid indentation and
@@ -46,18 +46,16 @@ Python style
 * Unless otherwise specified, follow :pep:`8`.
 
   Use :pypi:`flake8` to check for problems in this area. Note that our
-  ``setup.cfg`` file contains some excluded files (deprecated modules we don't
+  ``.flake8`` file contains some excluded files (deprecated modules we don't
   care about cleaning up and some third-party code that Django vendors) as well
   as some excluded errors that we don't consider as gross violations. Remember
   that :pep:`8` is only a guide, so respect the style of the surrounding code
   as a primary goal.
 
-  An exception to :pep:`8` is our rules on line lengths. Don't limit lines of
-  code to 79 characters if it means the code looks significantly uglier or is
-  harder to read. We allow up to 88 characters as this is the line length used
-  by ``black``. This check is included when you run ``flake8``. Documentation,
-  comments, and docstrings should be wrapped at 79 characters, even though
-  :pep:`8` suggests 72.
+  An exception to :pep:`8` is our rules on line lengths. We allow up to 88
+  characters in code, as this is the line length used by ``black``.
+  Documentation, comments, and docstrings should be wrapped at 79 characters.
+  These limits are checked when ``flake8`` is run.
 
 * String variable interpolation may use
   :py:ref:`%-formatting <old-string-formatting>`, :py:ref:`f-strings
@@ -127,13 +125,16 @@ Python style
         """
         ...
 
+* Where applicable, use unpacking generalizations compliant with :pep:`448`,
+  such as merging mappings (``{**x, **y}``) or sequences (``[*a, *b]``). This
+  improves performance, readability, and maintainability while reducing errors.
+
 .. _coding-style-imports:
 
 Imports
 =======
 
-* Use `isort <https://github.com/PyCQA/isort#readme>`_ to automate import
-  sorting using the guidelines below.
+* Use :pypi:`isort` to automate import sorting using the guidelines below.
 
   Quick start:
 
@@ -201,8 +202,7 @@ Imports
       CONSTANT = "foo"
 
 
-      class Example:
-          ...
+      class Example: ...
 
 * Use convenience imports whenever available. For example, do this
   ::
@@ -216,20 +216,149 @@ Imports
 Template style
 ==============
 
-* In Django template code, put one (and only one) space between the curly
-  brackets and the tag contents.
+Follow the below rules in Django template code.
+
+* ``{% extends %}`` should be the first non-comment line.
 
   Do this:
 
   .. code-block:: html+django
 
-      {{ foo }}
+      {% extends "base.html" %}
+
+      {% block content %}
+        <h1 class="font-semibold text-xl">
+          {{ pages.title }}
+        </h1>
+      {% endblock content %}
+
+  Or this:
+
+  .. code-block:: html+django
+
+      {# This is a comment #}
+      {% extends "base.html" %}
+
+      {% block content %}
+        <h1 class="font-semibold text-xl">
+          {{ pages.title }}
+        </h1>
+      {% endblock content %}
 
   Don't do this:
 
   .. code-block:: html+django
 
-      {{foo}}
+      {% load i18n %}
+      {% extends "base.html" %}
+
+      {% block content %}
+        <h1 class="font-semibold text-xl">
+          {{ pages.title }}
+        </h1>
+      {% endblock content %}
+
+* Put exactly one space between ``{{``, variable contents, and ``}}``.
+
+  Do this:
+
+  .. code-block:: html+django
+
+      {{ user }}
+
+  Don't do this:
+
+  .. code-block:: html+django
+
+      {{user}}
+
+* In ``{% load ... %}``, list libraries in alphabetical order.
+
+  Do this:
+
+  .. code-block:: html+django
+
+      {% load i18n l10 tz %}
+
+  Don't do this:
+
+  .. code-block:: html+django
+
+      {% load l10 i18n tz %}
+
+* Put exactly one space between ``{%``, tag contents, and ``%}``.
+
+  Do this:
+
+  .. code-block:: html+django
+
+      {% load humanize %}
+
+  Don't do this:
+
+  .. code-block:: html+django
+
+      {%load humanize%}
+
+* Put the ``{% block %}`` tag name in the ``{% endblock %}`` tag if it is not
+  on the same line.
+
+  Do this:
+
+  .. code-block:: html+django
+
+      {% block header %}
+
+        Code goes here
+
+      {% endblock header %}
+
+  Don't do this:
+
+  .. code-block:: html+django
+
+      {% block header %}
+
+        Code goes here
+
+      {% endblock %}
+
+* Inside curly braces, separate tokens by single spaces, except for around the
+  ``.`` for attribute access and the ``|`` for a filter.
+
+  Do this:
+
+  .. code-block:: html+django
+
+    {% if user.name|lower == "admin" %}
+
+  Don't do this:
+
+  .. code-block:: html+django
+
+    {% if user . name | lower  ==  "admin" %}
+
+    {{ user.name | upper }}
+
+* Within a template using ``{% extends %}``, avoid indenting top-level
+  ``{% block %}`` tags.
+
+  Do this:
+
+  .. code-block:: html+django
+
+      {% extends "base.html" %}
+
+      {% block content %}
+
+  Don't do this:
+
+  .. code-block:: html+django
+
+      {% extends "base.html" %}
+
+        {% block content %}
+        ...
 
 View style
 ==========
@@ -239,13 +368,11 @@ View style
 
   Do this::
 
-      def my_view(request, foo):
-          ...
+      def my_view(request, foo): ...
 
   Don't do this::
 
-      def my_view(req, foo):
-          ...
+      def my_view(req, foo): ...
 
 Model style
 ===========
@@ -292,22 +419,29 @@ Model style
   * All database fields
   * Custom manager attributes
   * ``class Meta``
-  * ``def __str__()``
+  * ``def __str__()`` and other Python magic methods
   * ``def save()``
   * ``def get_absolute_url()``
   * Any custom methods
 
 * If ``choices`` is defined for a given model field, define each choice as a
-  list of tuples, with an all-uppercase name as a class attribute on the model.
+  mapping, with an all-uppercase name as a class attribute on the model.
   Example::
 
     class MyModel(models.Model):
         DIRECTION_UP = "U"
         DIRECTION_DOWN = "D"
-        DIRECTION_CHOICES = [
-            (DIRECTION_UP, "Up"),
-            (DIRECTION_DOWN, "Down"),
-        ]
+        DIRECTION_CHOICES = {
+            DIRECTION_UP: "Up",
+            DIRECTION_DOWN: "Down",
+        }
+
+  Alternatively, consider using :ref:`field-choices-enum-types`::
+
+    class MyModel(models.Model):
+        class Direction(models.TextChoices):
+            UP = "U", "Up"
+            DOWN = "D", "Down"
 
 Use of ``django.conf.settings``
 ===============================
@@ -374,5 +508,4 @@ JavaScript style
 For details about the JavaScript code style used by Django, see
 :doc:`javascript`.
 
-.. _black: https://black.readthedocs.io/en/stable/
 .. _editorconfig: https://editorconfig.org/

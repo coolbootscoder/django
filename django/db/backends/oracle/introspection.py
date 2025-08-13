@@ -1,58 +1,39 @@
 from collections import namedtuple
 
-import cx_Oracle
+import oracledb
 
 from django.db import models
 from django.db.backends.base.introspection import BaseDatabaseIntrospection
 from django.db.backends.base.introspection import FieldInfo as BaseFieldInfo
 from django.db.backends.base.introspection import TableInfo as BaseTableInfo
-from django.utils.functional import cached_property
 
 FieldInfo = namedtuple(
-    "FieldInfo", BaseFieldInfo._fields + ("is_autofield", "is_json", "comment")
+    "FieldInfo", [*BaseFieldInfo._fields, "is_autofield", "is_json", "comment"]
 )
-TableInfo = namedtuple("TableInfo", BaseTableInfo._fields + ("comment",))
+TableInfo = namedtuple("TableInfo", [*BaseTableInfo._fields, "comment"])
 
 
 class DatabaseIntrospection(BaseDatabaseIntrospection):
     cache_bust_counter = 1
 
     # Maps type objects to Django Field types.
-    @cached_property
-    def data_types_reverse(self):
-        if self.connection.cx_oracle_version < (8,):
-            return {
-                cx_Oracle.BLOB: "BinaryField",
-                cx_Oracle.CLOB: "TextField",
-                cx_Oracle.DATETIME: "DateField",
-                cx_Oracle.FIXED_CHAR: "CharField",
-                cx_Oracle.FIXED_NCHAR: "CharField",
-                cx_Oracle.INTERVAL: "DurationField",
-                cx_Oracle.NATIVE_FLOAT: "FloatField",
-                cx_Oracle.NCHAR: "CharField",
-                cx_Oracle.NCLOB: "TextField",
-                cx_Oracle.NUMBER: "DecimalField",
-                cx_Oracle.STRING: "CharField",
-                cx_Oracle.TIMESTAMP: "DateTimeField",
-            }
-        else:
-            return {
-                cx_Oracle.DB_TYPE_DATE: "DateField",
-                cx_Oracle.DB_TYPE_BINARY_DOUBLE: "FloatField",
-                cx_Oracle.DB_TYPE_BLOB: "BinaryField",
-                cx_Oracle.DB_TYPE_CHAR: "CharField",
-                cx_Oracle.DB_TYPE_CLOB: "TextField",
-                cx_Oracle.DB_TYPE_INTERVAL_DS: "DurationField",
-                cx_Oracle.DB_TYPE_NCHAR: "CharField",
-                cx_Oracle.DB_TYPE_NCLOB: "TextField",
-                cx_Oracle.DB_TYPE_NVARCHAR: "CharField",
-                cx_Oracle.DB_TYPE_NUMBER: "DecimalField",
-                cx_Oracle.DB_TYPE_TIMESTAMP: "DateTimeField",
-                cx_Oracle.DB_TYPE_VARCHAR: "CharField",
-            }
+    data_types_reverse = {
+        oracledb.DB_TYPE_DATE: "DateField",
+        oracledb.DB_TYPE_BINARY_DOUBLE: "FloatField",
+        oracledb.DB_TYPE_BLOB: "BinaryField",
+        oracledb.DB_TYPE_CHAR: "CharField",
+        oracledb.DB_TYPE_CLOB: "TextField",
+        oracledb.DB_TYPE_INTERVAL_DS: "DurationField",
+        oracledb.DB_TYPE_NCHAR: "CharField",
+        oracledb.DB_TYPE_NCLOB: "TextField",
+        oracledb.DB_TYPE_NVARCHAR: "CharField",
+        oracledb.DB_TYPE_NUMBER: "DecimalField",
+        oracledb.DB_TYPE_TIMESTAMP: "DateTimeField",
+        oracledb.DB_TYPE_VARCHAR: "CharField",
+    }
 
     def get_field_type(self, data_type, description):
-        if data_type == cx_Oracle.NUMBER:
+        if data_type == oracledb.NUMBER:
             precision, scale = description[4:6]
             if scale == 0:
                 if precision > 11:
@@ -71,7 +52,7 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
                     return "IntegerField"
             elif scale == -127:
                 return "FloatField"
-        elif data_type == cx_Oracle.NCLOB and description.is_json:
+        elif data_type == oracledb.NCLOB and description.is_json:
             return "JSONField"
 
         return super().get_field_type(data_type, description)
@@ -212,7 +193,7 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
                 is_json,
                 comment,
             ) = field_map[name]
-            name %= {}  # cx_Oracle, for some reason, doubles percent signs.
+            name %= {}  # oracledb, for some reason, doubles percent signs.
             description.append(
                 FieldInfo(
                     self.identifier_converter(name),
@@ -273,8 +254,8 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
 
     def get_relations(self, cursor, table_name):
         """
-        Return a dictionary of {field_name: (field_name_other_table, other_table)}
-        representing all foreign keys in the given table.
+        Return a dictionary of {field_name: (field_name_other_table,
+        other_table)} representing all foreign keys in the given table.
         """
         table_name = table_name.upper()
         cursor.execute(

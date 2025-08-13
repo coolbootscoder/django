@@ -27,6 +27,11 @@ class BaseDatabaseFeatures:
     # Does the backend allow inserting duplicate rows when a unique_together
     # constraint exists and some fields are nullable but not all of them?
     supports_partially_nullable_unique_constraints = True
+
+    # Does the backend supports specifying whether NULL values should be
+    # considered distinct in unique constraints?
+    supports_nulls_distinct_unique_constraints = False
+
     # Does the backend support initially deferrable unique constraints?
     supports_deferrable_unique_constraints = False
 
@@ -169,9 +174,6 @@ class BaseDatabaseFeatures:
 
     schema_editor_uses_clientside_param_binding = False
 
-    # Does it support operations requiring references rename in a transaction?
-    supports_atomic_references_rename = True
-
     # Can we issue more than one ALTER COLUMN clause in an ALTER TABLE?
     supports_combined_alters = False
 
@@ -193,12 +195,14 @@ class BaseDatabaseFeatures:
     # Does the backend support introspection of CHECK constraints?
     can_introspect_check_constraints = True
 
-    # Does the backend support 'pyformat' style ("... %(name)s ...", {'name': value})
+    # Does the backend support 'pyformat' style:
+    # ("... %(name)s ...", {'name': value})
     # parameter passing? Note this can be provided by the backend even if not
     # supported by the Python driver
     supports_paramstyle_pyformat = True
 
-    # Does the backend require literal defaults, rather than parameterized ones?
+    # Does the backend require literal defaults, rather than parameterized
+    # ones?
     requires_literal_defaults = False
 
     # Does the backend support functions in defaults?
@@ -210,7 +214,8 @@ class BaseDatabaseFeatures:
     # Does the backend support the DEFAULT keyword in bulk insert queries?
     supports_default_keyword_in_bulk_insert = True
 
-    # Does the backend require a connection reset after each material schema change?
+    # Does the backend require a connection reset after each material schema
+    # change?
     connection_persists_old_columns = False
 
     # What kind of error does the backend throw when accessing closed cursor?
@@ -225,11 +230,12 @@ class BaseDatabaseFeatures:
     # If NULL is implied on columns without needing to be explicitly specified
     implied_column_null = False
 
-    # Does the backend support "select for update" queries with limit (and offset)?
+    # Does the backend support "select for update" queries with limit (and
+    # offset)?
     supports_select_for_update_with_limit = True
 
-    # Does the backend ignore null expressions in GREATEST and LEAST queries unless
-    # every expression is null?
+    # Does the backend ignore null expressions in GREATEST and LEAST queries
+    # unless every expression is null?
     greatest_least_ignores_nulls = False
 
     # Can the backend clone databases for parallel test execution?
@@ -255,12 +261,25 @@ class BaseDatabaseFeatures:
     # expressions?
     supports_aggregate_filter_clause = False
 
+    # Does the database support ORDER BY in aggregate expressions?
+    supports_aggregate_order_by_clause = False
+
+    # Does the database backend support DISTINCT when using multiple arguments
+    # in an aggregate expression? For example, Sqlite treats the "delimiter"
+    # argument of STRING_AGG/GROUP_CONCAT as an extra argument and does not
+    # allow using a custom delimiter along with DISTINCT.
+    supports_aggregate_distinct_multiple_argument = True
+
+    # Does the database support SQL 2023 ANY_VALUE in GROUP BY?
+    supports_any_value = False
+
     # Does the backend support indexing a TextField?
     supports_index_on_text_field = True
 
     # Does the backend support window expressions (expression OVER (...))?
     supports_over_clause = False
     supports_frame_range_fixed_distance = False
+    supports_frame_exclusion = False
     only_supports_unbounded_with_preceding_and_following = False
 
     # Does the backend support CAST with precision?
@@ -274,10 +293,6 @@ class BaseDatabaseFeatures:
     # functionality of the procedure isn't important.
     create_test_procedure_without_params_sql = None
     create_test_procedure_with_int_param_sql = None
-
-    # SQL to create a table with a composite primary key for use by the Django
-    # test suite.
-    create_test_table_with_composite_primary_key = None
 
     # Does the backend support keyword parameters for cursor.callproc()?
     supports_callproc_kwargs = False
@@ -339,6 +354,8 @@ class BaseDatabaseFeatures:
     json_key_contains_list_matching_requires_list = False
     # Does the backend support JSONObject() database function?
     has_json_object_function = True
+    # Does the backend support negative JSON array indexing?
+    supports_json_negative_indexing = True
 
     # Does the backend support column collations?
     supports_collation_on_charfield = True
@@ -351,6 +368,11 @@ class BaseDatabaseFeatures:
     # Does the backend support column comments in ADD COLUMN statements?
     supports_comments_inline = False
 
+    # Does the backend support stored generated columns?
+    supports_stored_generated_columns = False
+    # Does the backend support virtual generated columns?
+    supports_virtual_generated_columns = False
+
     # Does the backend support the logical XOR operator?
     supports_logical_xor = False
 
@@ -360,18 +382,29 @@ class BaseDatabaseFeatures:
     # Does the backend support unlimited character columns?
     supports_unlimited_charfield = False
 
+    # Does the backend support native tuple lookups (=, >, <, IN)?
+    supports_tuple_lookups = True
+
+    # Does the backend support native tuple gt(e), lt(e) comparisons against
+    # subqueries?
+    supports_tuple_comparison_against_subquery = True
+
     # Collation names for use by the Django test suite.
     test_collations = {
         "ci": None,  # Case-insensitive.
         "cs": None,  # Case-sensitive.
         "non_default": None,  # Non-default.
         "swedish_ci": None,  # Swedish case-insensitive.
+        "virtual": None,  # A collation that can be used for virtual columns.
     }
     # SQL template override for tests.aggregation.tests.NowUTC
     test_now_utc_template = None
 
     # SQL to create a model instance using the database defaults.
     insert_test_table_with_defaults = None
+
+    # Does the Round() database function round to even?
+    rounds_to_even = False
 
     # A set of dotted paths to tests in Django's test suite that are expected
     # to fail on this database.
@@ -382,6 +415,9 @@ class BaseDatabaseFeatures:
 
     def __init__(self, connection):
         self.connection = connection
+
+    def __del__(self):
+        del self.connection
 
     @cached_property
     def supports_explaining_query_execution(self):

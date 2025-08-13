@@ -5,6 +5,7 @@ These tests use dialogue from the 1975 film Monty Python and the Holy Grail.
 All text copyright Python (Monty) Pictures. Thanks to sacred-texts.com for the
 transcript.
 """
+
 from django.db.models import F, Value
 
 from . import PostgreSQLSimpleTestCase, PostgreSQLTestCase
@@ -601,8 +602,8 @@ class TestRankingAndWeights(GrailTestData, PostgreSQLTestCase):
                 rank=SearchRank(
                     SearchVector("dialogue"),
                     SearchQuery("brave sir robin"),
-                    # Divide the rank by the document length and by the number of
-                    # unique words in document.
+                    # Divide the rank by the document length and by the number
+                    # of unique words in document.
                     normalization=Value(2).bitor(Value(8)),
                 ),
             )

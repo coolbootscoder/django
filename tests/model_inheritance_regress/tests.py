@@ -1,6 +1,7 @@
 """
 Regression tests for Model inheritance behavior.
 """
+
 import datetime
 from operator import attrgetter
 from unittest import expectedFailure
@@ -438,7 +439,8 @@ class ModelInheritanceTest(TestCase):
 
     def test_concrete_abstract_concrete_pk(self):
         """
-        Primary key set correctly with concrete->abstract->concrete inheritance.
+        Primary key set correctly with concrete->abstract->concrete
+        inheritance.
         """
         # Regression test for #13987: Primary key is incorrectly determined
         # when more than one model has a concrete->abstract->concrete

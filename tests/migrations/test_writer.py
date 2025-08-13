@@ -22,7 +22,8 @@ from django.core.validators import EmailValidator, RegexValidator
 from django.db import migrations, models
 from django.db.migrations.serializer import BaseSerializer
 from django.db.migrations.writer import MigrationWriter, OperationWriter
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
+from django.test.utils import extend_sys_path
 from django.utils.deconstruct import deconstructible
 from django.utils.functional import SimpleLazyObject
 from django.utils.timezone import get_default_timezone, get_fixed_timezone
@@ -31,9 +32,20 @@ from django.utils.translation import gettext_lazy as _
 from .models import FoodManager, FoodQuerySet
 
 
+def get_choices():
+    return [(i, str(i)) for i in range(3)]
+
+
 class DeconstructibleInstances:
     def deconstruct(self):
         return ("DeconstructibleInstances", [], {})
+
+
+@deconstructible
+class DeconstructibleArbitrary:
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
 
 
 class Money(decimal.Decimal):
@@ -75,6 +87,29 @@ class IntEnum(enum.IntEnum):
 class IntFlagEnum(enum.IntFlag):
     A = 1
     B = 2
+
+
+def decorator(f):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
+@decorator
+def function_with_decorator():
+    pass
+
+
+@functools.cache
+def function_with_cache():
+    pass
+
+
+@functools.lru_cache(maxsize=10)
+def function_with_lru_cache():
+    pass
 
 
 class OperationWriterTests(SimpleTestCase):
@@ -121,6 +156,24 @@ class OperationWriterTests(SimpleTestCase):
             "custom_migration_operations.operations.ArgsKwargsOperation(\n"
             "    arg1=1,\n"
             "    arg2=2,\n"
+            "    kwarg2=4,\n"
+            "),",
+        )
+
+    def test_keyword_only_args_signature(self):
+        operation = (
+            custom_migration_operations.operations.ArgsAndKeywordOnlyArgsOperation(
+                1, 2, kwarg1=3, kwarg2=4
+            )
+        )
+        buff, imports = OperationWriter(operation, indentation=0).serialize()
+        self.assertEqual(imports, {"import custom_migration_operations.operations"})
+        self.assertEqual(
+            buff,
+            "custom_migration_operations.operations.ArgsAndKeywordOnlyArgsOperation(\n"
+            "    arg1=1,\n"
+            "    arg2=2,\n"
+            "    kwarg1=3,\n"
             "    kwarg2=4,\n"
             "),",
         )
@@ -211,6 +264,10 @@ class WriterTests(SimpleTestCase):
         X = "X", "X value"
         Y = "Y", "Y value"
 
+        @classmethod
+        def method(cls):
+            return cls.X
+
     def safe_exec(self, string, value=None):
         d = {}
         try:
@@ -242,6 +299,18 @@ class WriterTests(SimpleTestCase):
         self.assertEqual(value.max_length, new_value.max_length)
         self.assertEqual(value.null, new_value.null)
         self.assertEqual(value.unique, new_value.unique)
+
+    def assertSerializedFunctoolsPartialEqual(
+        self, value, expected_string, expected_imports
+    ):
+        string, imports = MigrationWriter.serialize(value)
+        self.assertEqual(string, expected_string)
+        self.assertEqual(imports, expected_imports)
+        result = self.serialize_round_trip(value)
+        self.assertEqual(result.func, value.func)
+        self.assertEqual(result.args, value.args)
+        self.assertEqual(result.keywords, value.keywords)
+        return result
 
     def test_serialize_numbers(self):
         self.assertSerializedEqual(1)
@@ -456,6 +525,24 @@ class WriterTests(SimpleTestCase):
             "default=datetime.date(1969, 11, 19))",
         )
 
+    def test_serialize_dictionary_choices(self):
+        for choices in ({"Group": [(2, "2"), (1, "1")]}, {"Group": {2: "2", 1: "1"}}):
+            with self.subTest(choices):
+                field = models.IntegerField(choices=choices)
+                string = MigrationWriter.serialize(field)[0]
+                self.assertEqual(
+                    string,
+                    "models.IntegerField(choices=[('Group', [(2, '2'), (1, '1')])])",
+                )
+
+    def test_serialize_callable_choices(self):
+        field = models.IntegerField(choices=get_choices)
+        string = MigrationWriter.serialize(field)[0]
+        self.assertEqual(
+            string,
+            "models.IntegerField(choices=migrations.test_writer.get_choices)",
+        )
+
     def test_serialize_nested_class(self):
         for nested_cls in [self.NestedEnum, self.NestedChoices]:
             cls_name = nested_cls.__name__
@@ -467,6 +554,15 @@ class WriterTests(SimpleTestCase):
                         {"import migrations.test_writer"},
                     ),
                 )
+
+    def test_serialize_nested_class_method(self):
+        self.assertSerializedResultEqual(
+            self.NestedChoices.method,
+            (
+                "migrations.test_writer.WriterTests.NestedChoices.method",
+                {"import migrations.test_writer"},
+            ),
+        )
 
     def test_serialize_uuid(self):
         self.assertSerializedEqual(uuid.uuid1())
@@ -535,6 +631,20 @@ class WriterTests(SimpleTestCase):
         string = MigrationWriter.serialize(field)[0]
         self.assertEqual(string, "models.FilePathField(path=%r)" % path_like.path)
 
+    def test_serialize_zoneinfo(self):
+        self.assertSerializedEqual(zoneinfo.ZoneInfo("Asia/Kolkata"))
+        self.assertSerializedResultEqual(
+            zoneinfo.ZoneInfo("Asia/Kolkata"),
+            (
+                "zoneinfo.ZoneInfo(key='Asia/Kolkata')",
+                {"import zoneinfo"},
+            ),
+        )
+        self.assertSerializedResultEqual(
+            zoneinfo.ZoneInfo("Europe/Paris"),
+            ("zoneinfo.ZoneInfo(key='Europe/Paris')", {"import zoneinfo"}),
+        )
+
     def test_serialize_functions(self):
         with self.assertRaisesMessage(ValueError, "Cannot serialize function: lambda"):
             self.assertSerializedEqual(lambda x: 42)
@@ -542,6 +652,11 @@ class WriterTests(SimpleTestCase):
         string, imports = MigrationWriter.serialize(models.SET(42))
         self.assertEqual(string, "models.SET(42)")
         self.serialize_round_trip(models.SET(42))
+
+    def test_serialize_decorated_functions(self):
+        self.assertSerializedEqual(function_with_decorator)
+        self.assertSerializedEqual(function_with_cache)
+        self.assertSerializedEqual(function_with_lru_cache)
 
     def test_serialize_datetime(self):
         self.assertSerializedEqual(datetime.datetime.now())
@@ -560,6 +675,13 @@ class WriterTests(SimpleTestCase):
         self.assertSerializedResultEqual(
             datetime.datetime(2014, 1, 1, 1, 1),
             ("datetime.datetime(2014, 1, 1, 1, 1)", {"import datetime"}),
+        )
+        self.assertSerializedResultEqual(
+            datetime.datetime(2012, 1, 1, 1, 1, tzinfo=datetime.UTC),
+            (
+                "datetime.datetime(2012, 1, 1, 1, 1, tzinfo=datetime.timezone.utc)",
+                {"import datetime"},
+            ),
         )
         self.assertSerializedResultEqual(
             datetime.datetime(2012, 1, 1, 1, 1, tzinfo=datetime.timezone.utc),
@@ -785,19 +907,59 @@ class WriterTests(SimpleTestCase):
         self.assertSerializedEqual(datetime.timedelta(minutes=42))
 
     def test_serialize_functools_partial(self):
+        value = functools.partial(datetime.timedelta)
+        string, imports = MigrationWriter.serialize(value)
+        self.assertSerializedFunctoolsPartialEqual(
+            value,
+            "functools.partial(datetime.timedelta)",
+            {"import datetime", "import functools"},
+        )
+
+    def test_serialize_functools_partial_posarg(self):
+        value = functools.partial(datetime.timedelta, 1)
+        string, imports = MigrationWriter.serialize(value)
+        self.assertSerializedFunctoolsPartialEqual(
+            value,
+            "functools.partial(datetime.timedelta, 1)",
+            {"import datetime", "import functools"},
+        )
+
+    def test_serialize_functools_partial_kwarg(self):
+        value = functools.partial(datetime.timedelta, seconds=2)
+        string, imports = MigrationWriter.serialize(value)
+        self.assertSerializedFunctoolsPartialEqual(
+            value,
+            "functools.partial(datetime.timedelta, seconds=2)",
+            {"import datetime", "import functools"},
+        )
+
+    def test_serialize_functools_partial_mixed(self):
         value = functools.partial(datetime.timedelta, 1, seconds=2)
-        result = self.serialize_round_trip(value)
-        self.assertEqual(result.func, value.func)
-        self.assertEqual(result.args, value.args)
-        self.assertEqual(result.keywords, value.keywords)
+        string, imports = MigrationWriter.serialize(value)
+        self.assertSerializedFunctoolsPartialEqual(
+            value,
+            "functools.partial(datetime.timedelta, 1, seconds=2)",
+            {"import datetime", "import functools"},
+        )
+
+    def test_serialize_functools_partial_non_identifier_keyword(self):
+        value = functools.partial(datetime.timedelta, **{"kebab-case": 1})
+        string, imports = MigrationWriter.serialize(value)
+        self.assertSerializedFunctoolsPartialEqual(
+            value,
+            "functools.partial(datetime.timedelta, **{'kebab-case': 1})",
+            {"import datetime", "import functools"},
+        )
 
     def test_serialize_functools_partialmethod(self):
         value = functools.partialmethod(datetime.timedelta, 1, seconds=2)
-        result = self.serialize_round_trip(value)
+        string, imports = MigrationWriter.serialize(value)
+        result = self.assertSerializedFunctoolsPartialEqual(
+            value,
+            "functools.partialmethod(datetime.timedelta, 1, seconds=2)",
+            {"import datetime", "import functools"},
+        )
         self.assertIsInstance(result, functools.partialmethod)
-        self.assertEqual(result.func, value.func)
-        self.assertEqual(result.args, value.args)
-        self.assertEqual(result.keywords, value.keywords)
 
     def test_serialize_type_none(self):
         self.assertSerializedEqual(NoneType)
@@ -873,6 +1035,29 @@ class WriterTests(SimpleTestCase):
                 writer = MigrationWriter(migration)
                 self.assertEqual(writer.path, expected_path)
 
+    @override_settings(
+        MIGRATION_MODULES={"namespace_app": "namespace_app.migrations"},
+        INSTALLED_APPS=[
+            "migrations.migrations_test_apps.distributed_app_location_2.namespace_app"
+        ],
+    )
+    def test_migration_path_distributed_namespace(self):
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        test_apps_dir = os.path.join(base_dir, "migrations", "migrations_test_apps")
+        expected_msg = (
+            "Could not locate an appropriate location to create "
+            "migrations package namespace_app.migrations. Make sure the toplevel "
+            "package exists and can be imported."
+        )
+        with extend_sys_path(
+            os.path.join(test_apps_dir, "distributed_app_location_1"),
+            os.path.join(test_apps_dir, "distributed_app_location_2"),
+        ):
+            migration = migrations.Migration("0001_initial", "namespace_app")
+            writer = MigrationWriter(migration)
+            with self.assertRaisesMessage(ValueError, expected_msg):
+                writer.path
+
     def test_custom_operation(self):
         migration = type(
             "Migration",
@@ -937,7 +1122,7 @@ class WriterTests(SimpleTestCase):
                         "myfield",
                         models.DateTimeField(
                             default=datetime.datetime(
-                                2012, 1, 1, 1, 1, tzinfo=datetime.timezone.utc
+                                2012, 1, 1, 1, 1, tzinfo=datetime.UTC
                             ),
                         ),
                     ),
@@ -961,7 +1146,7 @@ class WriterTests(SimpleTestCase):
         Test comments at top of file.
         """
         migration = type("Migration", (migrations.Migration,), {"operations": []})
-        dt = datetime.datetime(2015, 7, 31, 4, 40, 0, 0, tzinfo=datetime.timezone.utc)
+        dt = datetime.datetime(2015, 7, 31, 4, 40, 0, 0, tzinfo=datetime.UTC)
         with mock.patch("django.db.migrations.writer.now", lambda: dt):
             for include_header in (True, False):
                 with self.subTest(include_header=include_header):
@@ -1017,6 +1202,24 @@ class WriterTests(SimpleTestCase):
             "models.CharField(default=migrations.test_writer.DeconstructibleInstances)",
         )
 
+    def test_serialize_non_identifier_keyword_args(self):
+        instance = DeconstructibleArbitrary(
+            **{"kebab-case": 1, "my_list": [1, 2, 3], "123foo": {"456bar": set()}},
+            regular="kebab-case",
+            **{"simple": 1, "complex": 3.1416},
+        )
+        string, imports = MigrationWriter.serialize(instance)
+        self.assertEqual(
+            string,
+            "migrations.test_writer.DeconstructibleArbitrary(complex=3.1416, "
+            "my_list=[1, 2, 3], regular='kebab-case', simple=1, "
+            "**{'123foo': {'456bar': set()}, 'kebab-case': 1})",
+        )
+        self.assertEqual(imports, {"import migrations.test_writer"})
+        result = self.serialize_round_trip(instance)
+        self.assertEqual(result.args, instance.args)
+        self.assertEqual(result.kwargs, instance.kwargs)
+
     def test_register_serializer(self):
         class ComplexSerializer(BaseSerializer):
             def serialize(self):
@@ -1033,3 +1236,61 @@ class WriterTests(SimpleTestCase):
             ValueError, "'TestModel1' must inherit from 'BaseSerializer'."
         ):
             MigrationWriter.register_serializer(complex, TestModel1)
+
+    def test_composite_pk_import(self):
+        migration = type(
+            "Migration",
+            (migrations.Migration,),
+            {
+                "operations": [
+                    migrations.AddField(
+                        "foo",
+                        "bar",
+                        models.CompositePrimaryKey("foo_id", "bar_id"),
+                    ),
+                ],
+            },
+        )
+        writer = MigrationWriter(migration)
+        output = writer.as_string()
+        self.assertEqual(output.count("import"), 1)
+        self.assertIn("from django.db import migrations, models", output)
+
+    def test_run_before(self):
+        for run_before, expected_run_before_str in [
+            ([("foo", "0001_bar")], "    run_before = [('foo', '0001_bar')]\n"),
+            (
+                [("foo", "0001_bar"), ("foo", "0002_baz")],
+                "    run_before = [('foo', '0001_bar'), ('foo', '0002_baz')]\n",
+            ),
+        ]:
+            with self.subTest(run_before=run_before):
+                migration = type(
+                    "Migration",
+                    (migrations.Migration,),
+                    {"operations": [], "run_before": run_before},
+                )
+                writer = MigrationWriter(migration)
+                output = writer.as_string()
+                self.assertIn(expected_run_before_str, output)
+
+    def test_atomic_is_false(self):
+        migration = type(
+            "Migration",
+            (migrations.Migration,),
+            {"operations": [], "atomic": False},
+        )
+        writer = MigrationWriter(migration)
+        output = writer.as_string()
+        self.assertIn("    atomic = False\n", output)
+
+    def test_default_attributes(self):
+        migration = type("Migration", (migrations.Migration,), {})
+        writer = MigrationWriter(migration)
+        output = writer.as_string()
+        self.assertIn("    dependencies = [\n    ]\n", output)
+        self.assertIn("    operations = [\n    ]\n", output)
+        self.assertNotIn("atomic", output)
+        self.assertNotIn("initial", output)
+        self.assertNotIn("run_before", output)
+        self.assertNotIn("replaces", output)

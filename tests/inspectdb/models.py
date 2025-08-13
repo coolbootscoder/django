@@ -1,5 +1,6 @@
 from django.db import connection, models
 from django.db.models.functions import Lower
+from django.utils.functional import SimpleLazyObject
 
 
 class People(models.Model):
@@ -94,7 +95,9 @@ class JSONFieldColumnType(models.Model):
         }
 
 
-test_collation = connection.features.test_collations.get("non_default")
+test_collation = SimpleLazyObject(
+    lambda: connection.features.test_collations.get("non_default")
+)
 
 
 class CharFieldDbCollation(models.Model):
@@ -152,3 +155,9 @@ class DbComment(models.Model):
     class Meta:
         db_table_comment = "Custom table comment"
         required_db_features = {"supports_comments"}
+
+
+class CompositePKModel(models.Model):
+    pk = models.CompositePrimaryKey("column_1", "column_2")
+    column_1 = models.IntegerField()
+    column_2 = models.IntegerField()

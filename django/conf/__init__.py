@@ -16,20 +16,11 @@ from pathlib import Path
 import django
 from django.conf import global_settings
 from django.core.exceptions import ImproperlyConfigured
-from django.utils.deprecation import RemovedInDjango51Warning
 from django.utils.functional import LazyObject, empty
 
 ENVIRONMENT_VARIABLE = "DJANGO_SETTINGS_MODULE"
 DEFAULT_STORAGE_ALIAS = "default"
 STATICFILES_STORAGE_ALIAS = "staticfiles"
-
-DEFAULT_FILE_STORAGE_DEPRECATED_MSG = (
-    "The DEFAULT_FILE_STORAGE setting is deprecated. Use STORAGES instead."
-)
-
-STATICFILES_STORAGE_DEPRECATED_MSG = (
-    "The STATICFILES_STORAGE setting is deprecated. Use STORAGES instead."
-)
 
 
 class SettingsReference(str):
@@ -86,7 +77,8 @@ class LazySettings(LazyObject):
         val = getattr(_wrapped, name)
 
         # Special case some settings which require further modification.
-        # This is done here for performance reasons so the modified value is cached.
+        # This is done here for performance reasons so the modified value is
+        # cached.
         if name in {"MEDIA_URL", "STATIC_URL"} and val is not None:
             val = self._add_script_prefix(val)
         elif name == "SECRET_KEY" and not val:
@@ -155,26 +147,11 @@ class LazySettings(LazyObject):
         if not filename.startswith(os.path.dirname(django.__file__)):
             warnings.warn(message, category, stacklevel=2)
 
-    # RemovedInDjango51Warning.
-    @property
-    def DEFAULT_FILE_STORAGE(self):
-        self._show_deprecation_warning(
-            DEFAULT_FILE_STORAGE_DEPRECATED_MSG, RemovedInDjango51Warning
-        )
-        return self.__getattr__("DEFAULT_FILE_STORAGE")
-
-    # RemovedInDjango51Warning.
-    @property
-    def STATICFILES_STORAGE(self):
-        self._show_deprecation_warning(
-            STATICFILES_STORAGE_DEPRECATED_MSG, RemovedInDjango51Warning
-        )
-        return self.__getattr__("STATICFILES_STORAGE")
-
 
 class Settings:
     def __init__(self, settings_module):
-        # update this dict from global settings (but only for ALL_CAPS settings)
+        # update this dict from global settings (but only for ALL_CAPS
+        # settings)
         for setting in dir(global_settings):
             if setting.isupper():
                 setattr(self, setting, getattr(global_settings, setting))
@@ -217,20 +194,6 @@ class Settings:
             os.environ["TZ"] = self.TIME_ZONE
             time.tzset()
 
-        if self.is_overridden("DEFAULT_FILE_STORAGE"):
-            if self.is_overridden("STORAGES"):
-                raise ImproperlyConfigured(
-                    "DEFAULT_FILE_STORAGE/STORAGES are mutually exclusive."
-                )
-            warnings.warn(DEFAULT_FILE_STORAGE_DEPRECATED_MSG, RemovedInDjango51Warning)
-
-        if self.is_overridden("STATICFILES_STORAGE"):
-            if self.is_overridden("STORAGES"):
-                raise ImproperlyConfigured(
-                    "STATICFILES_STORAGE/STORAGES are mutually exclusive."
-                )
-            warnings.warn(STATICFILES_STORAGE_DEPRECATED_MSG, RemovedInDjango51Warning)
-
     def is_overridden(self, setting):
         return setting in self._explicit_settings
 
@@ -263,27 +226,7 @@ class UserSettingsHolder:
 
     def __setattr__(self, name, value):
         self._deleted.discard(name)
-        if name == "DEFAULT_FILE_STORAGE":
-            self.STORAGES[DEFAULT_STORAGE_ALIAS] = {
-                "BACKEND": self.DEFAULT_FILE_STORAGE
-            }
-            warnings.warn(DEFAULT_FILE_STORAGE_DEPRECATED_MSG, RemovedInDjango51Warning)
-        if name == "STATICFILES_STORAGE":
-            self.STORAGES[STATICFILES_STORAGE_ALIAS] = {
-                "BACKEND": self.STATICFILES_STORAGE
-            }
-            warnings.warn(STATICFILES_STORAGE_DEPRECATED_MSG, RemovedInDjango51Warning)
         super().__setattr__(name, value)
-        # RemovedInDjango51Warning.
-        if name == "STORAGES":
-            self.STORAGES.setdefault(
-                DEFAULT_STORAGE_ALIAS,
-                {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-            )
-            self.STORAGES.setdefault(
-                STATICFILES_STORAGE_ALIAS,
-                {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
-            )
 
     def __delattr__(self, name):
         self._deleted.add(name)

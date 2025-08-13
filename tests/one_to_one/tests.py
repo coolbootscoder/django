@@ -66,7 +66,8 @@ class OneToOneTests(TestCase):
         self.assertEqual(repr(r.place), "<Place: Demon Dogs the place>")
 
     def test_manager_all(self):
-        # Restaurant.objects.all() just returns the Restaurants, not the Places.
+        # Restaurant.objects.all() just returns the Restaurants, not the
+        # Places.
         self.assertSequenceEqual(Restaurant.objects.all(), [self.r1])
         # Place.objects.all() returns all Places, regardless of whether they
         # have Restaurants.
@@ -265,9 +266,10 @@ class OneToOneTests(TestCase):
         del p._state.fields_cache["restaurant"]
         self.assertIsNot(p.restaurant, r)
 
-        # Reassigning the Restaurant object results in an immediate cache update
-        # We can't use a new Restaurant because that'll violate one-to-one, but
-        # with a new *instance* the is test below will fail if #6886 regresses.
+        # Reassigning the Restaurant object results in an immediate cache
+        # update We can't use a new Restaurant because that'll violate
+        # one-to-one, but with a new *instance* the is test below will fail if
+        # #6886 regresses.
         r2 = Restaurant.objects.get(pk=r.pk)
         p.restaurant = r2
         self.assertIs(p.restaurant, r2)
@@ -298,8 +300,8 @@ class OneToOneTests(TestCase):
         r = Restaurant(place=p)
         self.assertIs(r.place, p)
 
-        # Creation using attname keyword argument and an id will cause the related
-        # object to be fetched.
+        # Creation using attname keyword argument and an id will cause the
+        # related object to be fetched.
         p = Place.objects.get(name="Demon Dogs")
         r = Restaurant(place_id=p.id)
         self.assertIsNot(r.place, p)
@@ -472,9 +474,7 @@ class OneToOneTests(TestCase):
         self.assertFalse(
             hasattr(
                 Target,
-                HiddenPointer._meta.get_field(
-                    "target"
-                ).remote_field.get_accessor_name(),
+                HiddenPointer._meta.get_field("target").remote_field.accessor_name,
             )
         )
 
@@ -485,10 +485,12 @@ class OneToOneTests(TestCase):
         private_school = School.objects.create(is_public=False)
         private_director = Director.objects.create(school=private_school, is_temp=True)
 
-        # Only one school is available via all() due to the custom default manager.
+        # Only one school is available via all() due to the custom default
+        # manager.
         self.assertSequenceEqual(School.objects.all(), [public_school])
 
-        # Only one director is available via all() due to the custom default manager.
+        # Only one director is available via all() due to the custom default
+        # manager.
         self.assertSequenceEqual(Director.objects.all(), [public_director])
 
         self.assertEqual(public_director.school, public_school)
@@ -499,9 +501,9 @@ class OneToOneTests(TestCase):
         # allow it.
         self.assertEqual(private_director.school, private_school)
 
-        # Make sure the base manager is used so that an student can still access
-        # its related school even if the default manager doesn't normally
-        # allow it.
+        # Make sure the base manager is used so that an student can still
+        # access its related school even if the default manager doesn't
+        # normally allow it.
         self.assertEqual(private_school.director, private_director)
 
         School._meta.base_manager_name = "objects"
@@ -523,6 +525,29 @@ class OneToOneTests(TestCase):
         finally:
             Director._meta.base_manager_name = None
             Director._meta._expire_cache()
+
+    def test_create_reverse_o2o_error(self):
+        msg = "The following fields do not exist in this model: restaurant"
+        with self.assertRaisesMessage(ValueError, msg):
+            Place.objects.create(restaurant=self.r1)
+
+    def test_get_or_create_reverse_o2o_error(self):
+        msg = "The following fields do not exist in this model: restaurant"
+        r2 = Restaurant.objects.create(
+            place=self.p2, serves_hot_dogs=True, serves_pizza=False
+        )
+        with self.assertRaisesMessage(ValueError, msg):
+            Place.objects.get_or_create(name="nonexistent", defaults={"restaurant": r2})
+
+    def test_update_or_create_reverse_o2o_error(self):
+        msg = "The following fields do not exist in this model: restaurant"
+        r2 = Restaurant.objects.create(
+            place=self.p2, serves_hot_dogs=True, serves_pizza=False
+        )
+        with self.assertRaisesMessage(ValueError, msg):
+            Place.objects.update_or_create(
+                name="nonexistent", defaults={"restaurant": r2}
+            )
 
     def test_hasattr_related_object(self):
         # The exception raised on attribute access when a related object
@@ -583,3 +608,14 @@ class OneToOneTests(TestCase):
         self.b1.place_id = self.p2.pk
         self.b1.save()
         self.assertEqual(self.b1.place, self.p2)
+
+    def test_get_prefetch_querysets_invalid_querysets_length(self):
+        places = Place.objects.all()
+        msg = (
+            "querysets argument of get_prefetch_querysets() should have a length of 1."
+        )
+        with self.assertRaisesMessage(ValueError, msg):
+            Place.bar.get_prefetch_querysets(
+                instances=places,
+                querysets=[Bar.objects.all(), Bar.objects.all()],
+            )

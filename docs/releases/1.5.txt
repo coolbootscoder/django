@@ -329,8 +329,7 @@ Django 1.5 also includes several smaller improvements worth noting:
   session data in a non-default cache.
 
 * Multi-column indexes can now be created on models. Read the
-  :attr:`~django.db.models.Options.index_together` documentation for more
-  information.
+  ``index_together`` documentation for more information.
 
 * During Django's logging configuration verbose Deprecation warnings are
   enabled and warnings are captured into the logging system. Logged warnings
@@ -592,7 +591,7 @@ sequences automatically together with the database flushing actions described
 above.
 
 This has been changed so no sequences are implicitly reset. This can cause
-:class:`~django.test.TransactionTestCase` tests that depend on hard-coded
+:class:`~django.test.TransactionTestCase` tests that depend on hardcoded
 primary key values to break.
 
 The new :attr:`~django.test.TransactionTestCase.reset_sequences` attribute can

@@ -37,7 +37,7 @@ basic apps`_ project. [#]_
     instructions.
 
 .. _OGC: https://www.ogc.org/
-.. _world borders: https://thematicmapping.org/downloads/world_borders.php
+.. _world borders: https://web.archive.org/web/20240123190237/https://thematicmapping.org/downloads/world_borders.php
 .. _GeoDjango basic apps: https://code.google.com/archive/p/geodjango-basic-apps
 
 Setting Up
@@ -115,7 +115,7 @@ unzip. On GNU/Linux platforms, use the following commands:
 
     $ mkdir world/data
     $ cd world/data
-    $ wget https://thematicmapping.org/downloads/TM_WORLD_BORDERS-0.3.zip
+    $ wget https://web.archive.org/web/20231220150759/https://thematicmapping.org/downloads/TM_WORLD_BORDERS-0.3.zip
     $ unzip TM_WORLD_BORDERS-0.3.zip
     $ cd ../..
 
@@ -131,7 +131,7 @@ extensions:
 * ``.prj``: Contains the spatial reference information for the geographic
   data stored in the shapefile.
 
-__ https://thematicmapping.org/downloads/TM_WORLD_BORDERS-0.3.zip
+__ https://web.archive.org/web/20231220150759/https://thematicmapping.org/downloads/TM_WORLD_BORDERS-0.3.zip
 __ https://en.wikipedia.org/wiki/Shapefile
 
 Use ``ogrinfo`` to examine spatial data
@@ -158,22 +158,34 @@ and use the ``-so`` option to get only the important summary information:
           using driver `ESRI Shapefile' successful.
 
     Layer name: TM_WORLD_BORDERS-0.3
+    Metadata:
+      DBF_DATE_LAST_UPDATE=2008-07-30
     Geometry: Polygon
     Feature Count: 246
     Extent: (-180.000000, -90.000000) - (180.000000, 83.623596)
     Layer SRS WKT:
-    GEOGCS["GCS_WGS_1984",
-        DATUM["WGS_1984",
-            SPHEROID["WGS_1984",6378137.0,298.257223563]],
-        PRIMEM["Greenwich",0.0],
-        UNIT["Degree",0.0174532925199433]]
+    GEOGCRS["WGS 84",
+        DATUM["World Geodetic System 1984",
+            ELLIPSOID["WGS 84",6378137,298.257223563,
+                LENGTHUNIT["metre",1]]],
+        PRIMEM["Greenwich",0,
+            ANGLEUNIT["degree",0.0174532925199433]],
+        CS[ellipsoidal,2],
+            AXIS["latitude",north,
+                ORDER[1],
+                ANGLEUNIT["degree",0.0174532925199433]],
+            AXIS["longitude",east,
+                ORDER[2],
+                ANGLEUNIT["degree",0.0174532925199433]],
+        ID["EPSG",4326]]
+    Data axis to CRS axis mapping: 2,1
     FIPS: String (2.0)
     ISO2: String (2.0)
     ISO3: String (3.0)
     UN: Integer (3.0)
     NAME: String (50.0)
     AREA: Integer (7.0)
-    POP2005: Integer (10.0)
+    POP2005: Integer64 (10.0)
     REGION: Integer (3.0)
     SUBREGION: Integer (3.0)
     LON: Real (8.3)
@@ -241,7 +253,7 @@ create a database migration:
     $ python manage.py makemigrations
     Migrations for 'world':
       world/migrations/0001_initial.py:
-        - Create model WorldBorder
+        + Create model WorldBorder
 
 Let's look at the SQL that will generate the table for the ``WorldBorder``
 model:
@@ -252,7 +264,7 @@ model:
 
 This command should produce the following output:
 
-.. console::
+.. code-block:: sql
 
     BEGIN;
     --
@@ -686,12 +698,13 @@ __ https://spatialreference.org/ref/epsg/32140/
 
     .. code-block:: pycon
 
-        from django.db import connection
-        # or if you're querying a non-default database:
-        from django.db import connections
-        connection = connections['your_gis_db_alias']
-
-        City.objects.raw('SELECT id, name, %s as point from myapp_city' % (connection.ops.select % 'point'))
+        >>> from django.db import connection
+        >>> # or if you're querying a non-default database:
+        >>> from django.db import connections
+        >>> connection = connections["your_gis_db_alias"]
+        >>> City.objects.raw(
+        ...     "SELECT id, name, %s as point from myapp_city" % (connection.ops.select % "point")
+        ... )
 
     You should only use raw queries when you know exactly what you're doing.
 
@@ -806,9 +819,8 @@ in your ``admin.py`` file::
 
 .. rubric:: Footnotes
 
-.. [#] Special thanks to Bjørn Sandvik of `thematicmapping.org
-       <https://thematicmapping.org/>`_ for providing and maintaining this
-       dataset.
+.. [#] Special thanks to Bjørn Sandvik of `mastermaps.net
+       <https://mastermaps.net/>`_ for providing and maintaining this dataset.
 .. [#] GeoDjango basic apps was written by Dane Springmeyer, Josh Livni, and
        Christopher Schmidt.
 .. [#] This point is the `University of Houston Law Center

@@ -134,6 +134,7 @@ class ServerHandler(simple_server.ServerHandler):
         if (
             self.environ["REQUEST_METHOD"] == "HEAD"
             and "Content-Length" in self.headers
+            and str(self.headers["Content-Length"]) == "0"
         ):
             del self.headers["Content-Length"]
         # HTTP/1.1 requires support for persistent connections. Send 'close' if
@@ -233,7 +234,9 @@ class WSGIRequestHandler(simple_server.WSGIRequestHandler):
             pass
 
     def handle_one_request(self):
-        """Copy of WSGIRequestHandler.handle() but with different ServerHandler"""
+        """
+        Copy of WSGIRequestHandler.handle() but with different ServerHandler
+        """
         self.raw_requestline = self.rfile.readline(65537)
         if len(self.raw_requestline) > 65536:
             self.requestline = ""

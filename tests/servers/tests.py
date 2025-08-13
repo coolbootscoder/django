@@ -1,6 +1,7 @@
 """
 Tests for django.core.servers.
 """
+
 import errno
 import os
 import socket
@@ -115,6 +116,7 @@ class LiveServerInMemoryDatabaseLockTest(LiveServerBase):
         connection.
         """
         conn = self.server_thread.connections_override[DEFAULT_DB_ALIAS]
+        source_connection = conn.connection
         # Open a connection to the database.
         conn.connect()
         # Create a transaction to lock the database.
@@ -128,6 +130,7 @@ class LiveServerInMemoryDatabaseLockTest(LiveServerBase):
         finally:
             # Release the transaction.
             cursor.execute("ROLLBACK")
+            source_connection.close()
 
 
 class FailingLiveServerThread(LiveServerThread):
@@ -195,8 +198,9 @@ class LiveServerViews(LiveServerBase):
         development server is rather simple we support it only in cases where
         we can detect a content length from the response. This should be doable
         for all simple views and streaming responses where an iterable with
-        length of one is passed. The latter follows as result of `set_content_length`
-        from https://github.com/python/cpython/blob/main/Lib/wsgiref/handlers.py.
+        length of one is passed. The latter follows as result of
+        `set_content_length` from
+        https://github.com/python/cpython/blob/main/Lib/wsgiref/handlers.py.
 
         If we cannot detect a content length we explicitly set the `Connection`
         header to `close` to notify the client that we do not actually support

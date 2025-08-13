@@ -6,6 +6,7 @@ from .models import (
     Child,
     ChildProxy,
     Primary,
+    PrimaryOneToOne,
     RefreshPrimaryProxy,
     Secondary,
     ShadowChild,
@@ -168,7 +169,8 @@ class DeferTests(AssertionMixin, TestCase):
         # You can retrieve a single column on a base class with no fields
         Child.objects.create(name="c1", value="foo", related=self.s1)
         obj = Child.objects.only("name").get(name="c1")
-        # on an inherited model, its PK is also fetched, hence '3' deferred fields.
+        # on an inherited model, its PK is also fetched, hence '3' deferred
+        # fields.
         self.assert_delayed(obj, 3)
         self.assertEqual(obj.name, "c1")
         self.assertEqual(obj.value, "foo")
@@ -214,7 +216,8 @@ class BigChildDeferTests(AssertionMixin, TestCase):
     def test_only_baseclass_when_subclass_has_added_field(self):
         # You can retrieve a single field on a baseclass
         obj = BigChild.objects.only("name").get(name="b1")
-        # when inherited model, its PK is also fetched, hence '4' deferred fields.
+        # when inherited model, its PK is also fetched, hence '4' deferred
+        # fields.
         self.assert_delayed(obj, 4)
         self.assertEqual(obj.name, "b1")
         self.assertEqual(obj.value, "foo")
@@ -289,6 +292,14 @@ class TestDefer2(AssertionMixin, TestCase):
             self.assertEqual(rf2.name, "new foo")
             self.assertEqual(rf2.value, "new bar")
 
+    def test_refresh_when_one_field_deferred(self):
+        s = Secondary.objects.create()
+        PrimaryOneToOne.objects.create(name="foo", value="bar", related=s)
+        s = Secondary.objects.defer("first").get()
+        p_before = s.primary_o2o
+        s.refresh_from_db()
+        self.assertIsNot(s.primary_o2o, p_before)
+
 
 class InvalidDeferTests(SimpleTestCase):
     def test_invalid_defer(self):
@@ -326,3 +337,28 @@ class InvalidDeferTests(SimpleTestCase):
         )
         with self.assertRaisesMessage(FieldError, msg):
             Primary.objects.only("name").select_related("related")[0]
+
+
+class DeferredRelationTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.secondary = Secondary.objects.create(first="a", second="b")
+        cls.primary = PrimaryOneToOne.objects.create(
+            name="Bella", value="Baxter", related=cls.secondary
+        )
+
+    def test_defer_not_clear_cached_relations(self):
+        obj = Secondary.objects.defer("first").get(pk=self.secondary.pk)
+        with self.assertNumQueries(1):
+            obj.primary_o2o
+        obj.first  # Accessing a deferred field.
+        with self.assertNumQueries(0):
+            obj.primary_o2o
+
+    def test_only_not_clear_cached_relations(self):
+        obj = Secondary.objects.only("first").get(pk=self.secondary.pk)
+        with self.assertNumQueries(1):
+            obj.primary_o2o
+        obj.second  # Accessing a deferred field.
+        with self.assertNumQueries(0):
+            obj.primary_o2o
