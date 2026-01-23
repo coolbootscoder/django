@@ -258,7 +258,7 @@ class MailTests(MailTestsMixin, SimpleTestCase):
         `surrogateescape`.
 
         Following https://github.com/python/cpython/issues/76511, newer
-        versions of Python (3.12.3 and 3.13) ensure that a message's
+        versions of Python (3.12.3 and 3.13+) ensure that a message's
         payload is encoded with the provided charset and `surrogateescape` is
         used as the error handling strategy.
 
@@ -1087,15 +1087,13 @@ class MailTests(MailTestsMixin, SimpleTestCase):
         Attaching a message that uses 8bit content transfer encoding for
         non-ASCII characters should not raise a UnicodeEncodeError (#36119).
         """
-        attachment = dedent(
-            """\
+        attachment = dedent("""\
             Subject: A message using 8bit CTE
             Content-Type: text/plain; charset=utf-8
             Content-Transfer-Encoding: 8bit
 
             ¡8-bit content!
-            """
-        ).encode()
+            """).encode()
         email = EmailMessage()
         email.attach("attachment.eml", attachment, "message/rfc822")
         attachments = self.get_raw_attachments(email)

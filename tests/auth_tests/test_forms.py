@@ -350,6 +350,9 @@ class BaseUserCreationFormTest(TestDataMixin, TestCase):
                     form.fields[field_name].widget.attrs["autocomplete"], autocomplete
                 )
 
+    def test_user_creation_form_class_getitem(self):
+        self.assertIs(BaseUserCreationForm["MyCustomUser"], BaseUserCreationForm)
+
 
 class CustomUserCreationFormTest(TestDataMixin, TestCase):
 
@@ -1231,7 +1234,7 @@ class PasswordResetFormTest(TestDataMixin, TestCase):
         self.assertEqual(len(mail.outbox), 0)
 
     def test_cleaned_data(self):
-        (user, username, email) = self.create_dummy_user()
+        user, username, email = self.create_dummy_user()
         data = {"email": email}
         form = PasswordResetForm(data)
         self.assertTrue(form.is_valid())
@@ -1300,7 +1303,7 @@ class PasswordResetFormTest(TestDataMixin, TestCase):
         """
         Inactive user cannot receive password reset email.
         """
-        (user, username, email) = self.create_dummy_user()
+        user, username, email = self.create_dummy_user()
         user.is_active = False
         user.save()
         form = PasswordResetForm({"email": email})
@@ -1327,7 +1330,7 @@ class PasswordResetFormTest(TestDataMixin, TestCase):
         html_email_template_name parameter passed in. Test to ensure original
         behavior is unchanged after the parameter was added.
         """
-        (user, username, email) = self.create_dummy_user()
+        user, username, email = self.create_dummy_user()
         form = PasswordResetForm({"email": email})
         self.assertTrue(form.is_valid())
         form.save()
@@ -1349,7 +1352,7 @@ class PasswordResetFormTest(TestDataMixin, TestCase):
         Test to ensure that a multipart email is sent with both text/plain
         and text/html parts.
         """
-        (user, username, email) = self.create_dummy_user()
+        user, username, email = self.create_dummy_user()
         form = PasswordResetForm({"email": email})
         self.assertTrue(form.is_valid())
         form.save(
@@ -1379,7 +1382,7 @@ class PasswordResetFormTest(TestDataMixin, TestCase):
 
     @override_settings(EMAIL_BACKEND="mail.custombackend.FailingEmailBackend")
     def test_save_send_email_exceptions_are_catched_and_logged(self):
-        (user, username, email) = self.create_dummy_user()
+        user, username, email = self.create_dummy_user()
         form = PasswordResetForm({"email": email})
         self.assertTrue(form.is_valid())
 

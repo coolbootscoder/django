@@ -1,6 +1,7 @@
 import argparse
 import ctypes
 import faulthandler
+import functools
 import hashlib
 import io
 import itertools
@@ -206,8 +207,7 @@ class RemoteTestResult(unittest.TestResult):
         pickle.loads(pickle.dumps(obj))
 
     def _print_unpicklable_subtest(self, test, subtest, pickle_exc):
-        print(
-            """
+        print("""
 Subtest failed:
 
     test: {}
@@ -220,10 +220,7 @@ test runner cannot handle it cleanly. Here is the pickling error:
 
 You should re-run this test with --parallel=1 to reproduce the failure
 with a cleaner failure message.
-""".format(
-                test, subtest, pickle_exc
-            )
-        )
+""".format(test, subtest, pickle_exc))
 
     def check_picklable(self, test, err):
         # Ensure that sys.exc_info() tuples are picklable. This displays a
@@ -244,8 +241,7 @@ with a cleaner failure message.
                 pickle_exc_txt, 75, initial_indent="    ", subsequent_indent="    "
             )
             if tblib is None:
-                print(
-                    """
+                print("""
 
 {} failed:
 
@@ -257,13 +253,9 @@ parallel test runner to handle this exception cleanly.
 In order to see the traceback, you should install tblib:
 
     python -m pip install tblib
-""".format(
-                        test, original_exc_txt
-                    )
-                )
+""".format(test, original_exc_txt))
             else:
-                print(
-                    """
+                print("""
 
 {} failed:
 
@@ -278,10 +270,7 @@ Here's the error encountered while trying to pickle the exception:
 
 You should re-run this test with the --parallel=1 option to reproduce the
 failure and get a correct traceback.
-""".format(
-                        test, original_exc_txt, pickle_exc_txt
-                    )
-                )
+""".format(test, original_exc_txt, pickle_exc_txt))
             raise
 
     def check_subtest_picklable(self, test, subtest):
@@ -439,7 +428,7 @@ def _init_worker(
     used_aliases=None,
 ):
     """
-    Switch to databases dedicated to this worker.
+    Switch to databases dedicated to this worker and run system checks.
 
     This helper lives at module-level because of the multiprocessing module's
     requirements.
@@ -473,6 +462,26 @@ def _init_worker(
             if value := serialized_contents.get(alias):
                 connection._test_serialized_contents = value
         connection.creation.setup_worker_connection(_worker_id)
+        if (
+            is_spawn_or_forkserver
+            and os.environ.get("RUNNING_DJANGOS_TEST_SUITE") == "true"
+        ):
+            connection.creation.mark_expected_failures_and_skips()
+
+    if is_spawn_or_forkserver:
+        call_command(
+            "check", stdout=io.StringIO(), stderr=io.StringIO(), databases=used_aliases
+        )
+
+
+def _safe_init_worker(init_worker, counter, *args, **kwargs):
+    try:
+        init_worker(counter, *args, **kwargs)
+    except Exception:
+        with counter.get_lock():
+            # Set a value that will not increment above zero any time soon.
+            counter.value = -1000
+        raise
 
 
 def _run_subsuite(args):
@@ -546,9 +555,16 @@ class ParallelTestSuite(unittest.TestSuite):
         """
         self.initialize_suite()
         counter = multiprocessing.Value(ctypes.c_int, 0)
-        pool = multiprocessing.Pool(
+        args = [
+            (self.runner_class, index, subsuite, self.failfast, self.buffer)
+            for index, subsuite in enumerate(self.subsuites)
+        ]
+        # Don't buffer in the main process to avoid error propagation issues.
+        result.buffer = False
+
+        with multiprocessing.Pool(
             processes=self.processes,
-            initializer=self.init_worker.__func__,
+            initializer=functools.partial(_safe_init_worker, self.init_worker.__func__),
             initargs=[
                 counter,
                 self.initial_settings,
@@ -558,31 +574,30 @@ class ParallelTestSuite(unittest.TestSuite):
                 self.debug_mode,
                 self.used_aliases,
             ],
-        )
-        args = [
-            (self.runner_class, index, subsuite, self.failfast, self.buffer)
-            for index, subsuite in enumerate(self.subsuites)
-        ]
-        test_results = pool.imap_unordered(self.run_subsuite.__func__, args)
+        ) as pool:
+            test_results = pool.imap_unordered(self.run_subsuite.__func__, args)
 
-        while True:
-            if result.shouldStop:
-                pool.terminate()
-                break
+            while True:
+                if result.shouldStop:
+                    pool.terminate()
+                    break
 
-            try:
-                subsuite_index, events = test_results.next(timeout=0.1)
-            except multiprocessing.TimeoutError:
-                continue
-            except StopIteration:
-                pool.close()
-                break
+                try:
+                    subsuite_index, events = test_results.next(timeout=0.1)
+                except multiprocessing.TimeoutError as err:
+                    if counter.value < 0:
+                        err.add_note("ERROR: _init_worker failed, see prior traceback")
+                        raise
+                    continue
+                except StopIteration:
+                    pool.close()
+                    break
 
-            tests = list(self.subsuites[subsuite_index])
-            for event in events:
-                self.handle_event(result, tests, event)
+                tests = list(self.subsuites[subsuite_index])
+                for event in events:
+                    self.handle_event(result, tests, event)
 
-        pool.join()
+            pool.join()
 
         return result
 

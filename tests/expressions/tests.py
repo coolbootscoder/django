@@ -137,6 +137,16 @@ class BasicExpressionsTests(TestCase):
         )
         self.assertEqual(companies["result"], 2395)
 
+    def test_decimal_division_literal_value(self):
+        """
+        Division with a literal Decimal value preserves precision.
+        """
+        num = Number.objects.create(integer=2)
+        obj = Number.objects.annotate(
+            val=F("integer") / Value(Decimal("3.0"), output_field=DecimalField())
+        ).get(pk=num.pk)
+        self.assertAlmostEqual(obj.val, Decimal("0.6667"), places=4)
+
     def test_annotate_values_filter(self):
         companies = (
             Company.objects.annotate(
@@ -420,8 +430,11 @@ class BasicExpressionsTests(TestCase):
         # F expressions can be used to update attributes on single objects
         self.gmbh.num_employees = F("num_employees") + 4
         self.gmbh.save()
-        self.gmbh.refresh_from_db()
-        self.assertEqual(self.gmbh.num_employees, 36)
+        expected_num_queries = (
+            0 if connection.features.can_return_rows_from_update else 1
+        )
+        with self.assertNumQueries(expected_num_queries):
+            self.assertEqual(self.gmbh.num_employees, 36)
 
     def test_new_object_save(self):
         # We should be able to use Funcs when inserting new data
@@ -1568,6 +1581,24 @@ class SimpleExpressionTests(SimpleTestCase):
         with self.assertRaisesMessage(ValueError, msg):
             expression.get_expression_for_validation()
 
+    def test_replace_expressions_falsey(self):
+        class AssignableExpression(Expression):
+            def __init__(self, *source_expressions):
+                super().__init__()
+                self.set_source_expressions(list(source_expressions))
+
+            def get_source_expressions(self):
+                return self.source_expressions
+
+            def set_source_expressions(self, exprs):
+                self.source_expressions = exprs
+
+        expression = AssignableExpression()
+        falsey = Q()
+        expression.set_source_expressions([falsey])
+        replaced = expression.replace_expressions({"replacement": Expression()})
+        self.assertEqual(replaced.get_source_expressions(), [falsey])
+
 
 class ExpressionsNumericTests(TestCase):
     @classmethod
@@ -1644,8 +1675,11 @@ class ExpressionsNumericTests(TestCase):
         n = Number.objects.create(integer=1, decimal_value=Decimal("0.5"))
         n.decimal_value = F("decimal_value") - Decimal("0.4")
         n.save()
-        n.refresh_from_db()
-        self.assertEqual(n.decimal_value, Decimal("0.1"))
+        expected_num_queries = (
+            0 if connection.features.can_return_rows_from_update else 1
+        )
+        with self.assertNumQueries(expected_num_queries):
+            self.assertEqual(n.decimal_value, Decimal("0.1"))
 
 
 class ExpressionOperatorTests(TestCase):

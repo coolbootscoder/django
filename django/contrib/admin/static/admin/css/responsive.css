@@ -170,6 +170,7 @@ input[type="submit"], button {
 
     /* Forms */
 
+    legend,
     label {
         font-size: 1rem;
     }
@@ -484,6 +485,7 @@ input[type="submit"], button {
         padding-top: 15px;
     }
 
+    .aligned legend,
     .aligned label {
         width: 100%;
         min-width: auto;
@@ -556,6 +558,10 @@ input[type="submit"], button {
 
     form .aligned div.radiolist:not(.inline) div + div {
         margin-top: 5px;
+    }
+
+    form .aligned fieldset div.flex-container {
+        display: unset;
     }
 
     /* Related widget */
